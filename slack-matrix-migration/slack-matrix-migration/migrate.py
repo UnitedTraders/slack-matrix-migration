@@ -36,7 +36,7 @@ from emoji import emojize
 
 from files import process_attachments, process_files
 
-from utils import send_event, invite_user
+from utils import send_event, invite_user, autojoin_users
 
 load_dotenv()
 
@@ -106,6 +106,8 @@ def test_config(yaml):
     config = config_yaml
 
     return config
+
+config = test_config(config_yaml)
 
 def loadZip(config):
     zipName = config["zipfile"]
@@ -201,7 +203,7 @@ def login(server_location):
     r = requests.post(url, json=data, verify=config["verify-ssl"])
 
     if r.status_code != 200:
-        log.info("ERROR! Received %d %s" % (r.status_code, r.reason))
+        log.info("ERROR login! Received %d %s" % (r.status_code, r.reason))
         if 400 <= r.status_code < 500:
             try:
                 log.info(r.json()["error"])
@@ -260,7 +262,7 @@ def register_user(
         return False
     else:
         if r.status_code != 200 and r.status_code != 201:
-            log.info("ERROR! Received %d %s" % (r.status_code, r.reason))
+            log.info("ERROR register user! Received %d %s" % (r.status_code, r.reason))
             if 400 <= r.status_code < 500:
                 try:
                     log.info(r.json()["error"])
@@ -320,7 +322,7 @@ def register_room(
         return False
 
     if r.status_code != 200:
-        log.error("ERROR! Received %d %s" % (r.status_code, r.reason))
+        log.error("ERROR register room! Received %d %s" % (r.status_code, r.reason))
         if 400 <= r.status_code < 500:
             try:
                 log.error(r.json()["error"])
@@ -338,34 +340,6 @@ def invite_users(
 ):
     for user in invitees:
         invite_user(roomId, user, config)
-
-def autojoin_users(
-    invitees,
-    roomId,
-    config,
-):
-    for user in invitees:
-        #POST /_matrix/client/r0/rooms/{roomId}/join
-        url = "%s/_matrix/client/r0/rooms/%s/join?user_id=%s" % (config["homeserver"],roomId,user,)
-
-        #_log.info("Sending registration request...")
-        try:
-            r = requests.post(url, headers={'Authorization': 'Bearer ' + config["as_token"]}, verify=config["verify-ssl"])
-        except requests.exceptions.RequestException as e:
-            log.error(
-                "Logging an uncaught exception {}".format(e),
-                exc_info=(traceback)
-            )
-            # log.debug("error creating room {}".format(body))
-            return False
-        else:
-            if r.status_code != 200:
-                log.error("ERROR! Received %d %s" % (r.status_code, r.reason))
-                if 400 <= r.status_code < 500:
-                    try:
-                        log.info(r.json()["error"])
-                    except Exception:
-                        pass
 
 def migrate_users(userFile, config, access_token):
     log = logging.getLogger('SLACK.MIGRATE.USER')
@@ -520,27 +494,29 @@ def migrate_dms(roomFile, config):
     channelData = json.load(roomFile)
     with alive_bar(len(channelData), bar = 'squares', spinner = 'waves2') as bar:
         for channel in channelData:
+
             if config["skip-archived"]:
                 if channel["is_archived"] == True:
                     bar()
                     continue
 
-            # skip dms with slackbot
-            if channel["user"] == "USLACKBOT":
+            # skip dms with slackbot and non exist users (usual it's bots)
+            if "USLACKBOT" in channel["members"] or channel["members"][0] not in userLUT or channel["members"][1] not in userLUT:
+                bar()
                 continue
 
-            _mxCreator = userLUT[channel["user"]]
+            _mxCreator = userLUT[channel["members"][0]]
 
             _invitees = []
             for user in channel["members"]:
-                if user != channel["user"]:
+                if user != channel["members"][0]:
                     _invitees.append(userLUT[user])
 
             roomDetails = {
                 "slack_id": channel["id"],
                 "slack_members": channel["members"],
                 "slack_created": channel["created"],
-                "slack_creator": channel["user"],
+                "slack_creator": channel["members"][0],
                 "matrix_id": '',
                 "matrix_creator": _mxCreator,
             }
@@ -549,7 +525,7 @@ def migrate_dms(roomFile, config):
                 res = register_room('', roomDetails["matrix_creator"], '', _invitees, "trusted_private_chat", config["homeserver"], config["as_token"])
 
                 if res == False:
-                    log.info("ERROR while registering room '" + roomDetails["slack_name"] + "'")
+                    log.info("ERROR while registering room '" + roomDetails["slack_id"] + "'")
                     continue
                 else:
                     _content = json.loads(res.content)
@@ -851,7 +827,7 @@ def kick_imported_users(server_location, admin_user, access_token, tick):
                     return False
                 else:
                     if r.status_code != 200 and r.status_code != 201:
-                        log.info("ERROR! Received %d %s" % (r.status_code, r.reason))
+                        log.info("ERROR kick imported users! Received %d %s" % (r.status_code, r.reason))
                         if 400 <= r.status_code < 500:
                             try:
                                 log.info(r.json()["error"])
@@ -865,8 +841,6 @@ def kick_imported_users(server_location, admin_user, access_token, tick):
 def main():
     logging.captureWarnings(True)
     log = logging.getLogger('SLACK.MIGRATE.MAIN')
-
-    config = test_config(yaml)
 
     jsonFiles = loadZip(config)
 
@@ -890,22 +864,23 @@ def main():
             log.info("Creating Users")
         userlist = migrate_users(jsonFiles["users.json"], config, access_token)
 
-    # create rooms and match to channels
-    # Slack channels
-    if "channels.json" in jsonFiles and not roomLUT:
-        if not config["run-unattended"]:
-            input('Creating channels. Press enter to proceed\n')
-        else:
-            log.info("Creating channels")
-        roomlist_channels = migrate_rooms(jsonFiles["channels.json"], config, admin_user)
+    if not roomLUT:
+        # create rooms and match to channels   
+        # Slack channels
+        if "channels.json" in jsonFiles:
+            if not config["run-unattended"]:
+                input('Creating channels. Press enter to proceed\n')
+            else:
+                log.info("Creating channels")
+            roomlist_channels = migrate_rooms(jsonFiles["channels.json"], config, admin_user)
 
-    # Slack groups
-    if "groups.json" in jsonFiles and not roomLUT:
-        if not config["run-unattended"]:
-            input('Creating groups. Press enter to proceed\n')
-        else:
-            log.info("Creating groups")
-        roomlist_groups = migrate_rooms(jsonFiles["groups.json"], config, admin_user)
+        # Slack groups (private channels)
+        if "groups.json" in jsonFiles:
+            if not config["run-unattended"]:
+                input('Creating groups. Press enter to proceed\n')
+            else:
+                log.info("Creating groups")
+            roomlist_groups = migrate_rooms(jsonFiles["groups.json"], config, admin_user)
 
     # create DMs
     if "dms.json" in jsonFiles and not dmLUT:
@@ -913,7 +888,7 @@ def main():
             input('Creating DMs. Press enter to proceed\n')
         else:
             log.info("Creating DMs")
-        roomlist_dms = migrate_dms(jsonFiles["dms.json"], config, admin_user)
+        roomlist_dms = migrate_dms(jsonFiles["dms.json"], config)
 
     # write LUTs to file to be able to load from later if something goes wrong
     if not read_luts:

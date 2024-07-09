@@ -174,7 +174,7 @@ def slackFileToMatrixMessage(file, url, thumbnailUrl):
 def uploadContentFromURI(content, uri, config, user):
     res = requests.get(uri)
     if res.status_code != 200:
-        log.info("ERROR! Received %d %s" % (res.status_code, res.reason))
+        log.info("ERROR upload Content From URI! Received %d %s" % (res.status_code, res.reason))
         if 400 <= res.status_code < 500:
             try:
                 log.info(res.json()["error"])
@@ -197,7 +197,7 @@ def uploadContentFromURI(content, uri, config, user):
         return False
     else:
         if r.status_code != 200:
-            log.info("ERROR! Received %d %s" % (r.status_code, r.reason))
+            log.info("ERROR upload Content From URI! Received %d %s" % (r.status_code, r.reason))
             if 400 <= r.status_code < 500:
                 try:
                     log.info(r.json()["error"])
@@ -227,7 +227,7 @@ def process_snippet(file, roomId, userId, body, txnId, config, ts):
     htmlString = ""
     res = requests.get(file["url_private"])
     if res.status_code != 200:
-        log.info("ERROR! Received %d %s" % (res.status_code, res.reason))
+        log.info("ERROR process snippet! Received %d %s" % (res.status_code, res.reason))
         if 400 <= res.status_code < 500:
             try:
                 log.info(res.json()["error"])

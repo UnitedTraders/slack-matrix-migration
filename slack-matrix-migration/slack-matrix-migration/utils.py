@@ -32,6 +32,33 @@ log.addHandler(fileHandler)
 # consoleHandler.setFormatter(logFormatter)
 # log.addHandler(consoleHandler)
 
+def autojoin_users(
+    invitees,
+    roomId,
+    config,
+):
+    for user in invitees:
+        #POST /_matrix/client/r0/rooms/{roomId}/join
+        url = "%s/_matrix/client/r0/rooms/%s/join?user_id=%s" % (config["homeserver"],roomId,user,)
+
+        #_log.info("Sending registration request...")
+        try:
+            r = requests.post(url, headers={'Authorization': 'Bearer ' + config["as_token"]}, verify=config["verify-ssl"])
+        except requests.exceptions.RequestException as e:
+            log.error(
+                "Logging an uncaught exception {}".format(e),
+                exc_info=(traceback)
+            )
+            # log.debug("error creating room {}".format(body))
+            return False
+        else:
+            if r.status_code != 200:
+                log.error("ERROR in autojoin! Received %d %s" % (r.status_code, r.reason))
+                if 400 <= r.status_code < 500:
+                    try:
+                        log.info(r.json()["error"])
+                    except Exception:
+                        pass
 
 def send_event(
     config,
@@ -62,12 +89,15 @@ def send_event(
         return False
     else:
         if r.status_code != 200:
-            log.error("ERROR! Received %d %s" % (r.status_code, r.reason))
+            log.error("ERROR send event! Received %d %s" % (r.status_code, r.reason))
+            log.info("Autojoin {} to {}".format(matrix_user_id, matrix_room))
             if r.status_code == 403:
-                invite_user(
+                _invitees = []
+                _invitees.append(matrix_user_id)
+                autojoin_users(
+                    _invitees,
                     matrix_room,
-                    matrix_user_id,
-                    conf
+                    config
                 )
                 try:
                     r = requests.put(url, headers={'Authorization': 'Bearer ' + config["as_token"]}, json=matrix_message, verify=config["verify-ssl"])
@@ -120,7 +150,7 @@ def invite_user(
             return False
         else:
             if r.status_code != 200:
-                log.info("ERROR! Received %d %s" % (r.status_code, r.reason))
+                log.info("ERROR invite user! Received %d %s" % (r.status_code, r.reason))
                 if 400 <= r.status_code < 500:
                     try:
                         log.info(r.json()["error"])
