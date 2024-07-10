@@ -23,7 +23,6 @@ import re
 import secrets
 import string
 import sys
-import time
 import traceback
 import zipfile
 
@@ -63,8 +62,10 @@ nameLUT = {}
 roomLUT = {}
 roomLUT2 = {}
 dmLUT = {}
+# maps Slack message id in form <user><ts> to Matrix event id
 eventLUT = {}
 threadLUT = {}
+# maps reply message id in form <user><ts> to parent message id in form <user><ts>
 replyLUT = {}
 later = []
 read_luts = False
@@ -87,6 +88,7 @@ if os.path.isfile("run/luts.yaml"):
     dmLUT = luts["dmLUT"]
     read_luts = True
 
+
 def test_config(yaml):
     if not config_yaml["zipfile"]:
         log.info("No zipfile defined in config")
@@ -107,7 +109,9 @@ def test_config(yaml):
 
     return config
 
+
 config = test_config(config_yaml)
+
 
 def loadZip(config):
     zipName = config["zipfile"]
@@ -122,6 +126,7 @@ def loadZip(config):
             log.info("Warning: Couldn't find " + channelType + " in archive. Skipping.")
     return jsonFiles
 
+
 def loadZipFolder(config, folder):
     with zipfile.ZipFile(config["zipfile"], 'r') as file:
         archive = file.infolist()
@@ -134,6 +139,7 @@ def loadZipFolder(config, folder):
 
         return fileList
 
+
 # TODO: user alive-progress
 # using bubble bar and notes spinner
 # with alive_bar(200, bar = 'bubbles', spinner = 'pointer') as bar:
@@ -145,7 +151,7 @@ def loadZipFolder(config, folder):
 ## A value under 0 represents a 'halt'.
 ## A value at 1 or bigger represents 100%
 def update_progress(progress):
-    barLength = 40 # Modify this to change the length of the progress bar
+    barLength = 40  # Modify this to change the length of the progress bar
     status = ""
     if isinstance(progress, int):
         progress = float(progress)
@@ -158,10 +164,11 @@ def update_progress(progress):
     if progress >= 1:
         progress = 1
         status = "Done...\r\n"
-    block = int(round(barLength*progress))
-    text = "\rPercent: [{0}] {1:3.2f}% {2}".format( "#"*block + "-"*(barLength-block), progress*100, status)
+    block = int(round(barLength * progress))
+    text = "\rPercent: [{0}] {1:3.2f}% {2}".format("#" * block + "-" * (barLength - block), progress * 100, status)
     sys.stdout.write(text)
     sys.stdout.flush()
+
 
 def login(server_location):
     try:
@@ -215,9 +222,10 @@ def login(server_location):
 
     return admin_user, access_token
 
+
 def getMaxUploadSize(config, access_token):
     # get maxUploadSize from Homeserver
-    url = "%s/_matrix/media/r0/config?access_token=%s" % (config_yaml["homeserver"],access_token,)
+    url = "%s/_matrix/media/r0/config?access_token=%s" % (config_yaml["homeserver"], access_token,)
     r = requests.get(url, verify=config["verify-ssl"])
 
     if r.status_code != 200:
@@ -231,16 +239,16 @@ def getMaxUploadSize(config, access_token):
     maxUploadSize = r.json()["m.upload.size"]
     return maxUploadSize
 
-def register_user(
-    user,
-    password,
-    displayname,
-    server_location,
-    access_token,
-    admin=False,
-    user_type=None,
-):
 
+def register_user(
+        user,
+        password,
+        displayname,
+        server_location,
+        access_token,
+        admin=False,
+        user_type=None,
+):
     url = "%s/_synapse/admin/v2/users/@%s:%s" % (server_location, user, config_yaml['domain'])
 
     headers = {'Authorization': ' '.join(['Bearer', access_token])}
@@ -272,27 +280,28 @@ def register_user(
         else:
             return r
 
+
 def register_room(
-    name,
-    creator,
-    topic,
-    invitees,
-    preset,
-    server_location,
-    as_token,
+        name,
+        creator,
+        topic,
+        invitees,
+        preset,
+        server_location,
+        as_token,
 ):
     # register room
     log.debug("register room {}".format(
-            (
-                name,
-                creator,
-                topic,
-                invitees,
-                preset,
-            )
+        (
+            name,
+            creator,
+            topic,
+            invitees,
+            preset,
         )
     )
-    url = "%s/_matrix/client/r0/createRoom?user_id=%s" % (server_location,creator,)
+    )
+    url = "%s/_matrix/client/r0/createRoom?user_id=%s" % (server_location, creator,)
 
     body = {
         "preset": preset,
@@ -305,9 +314,10 @@ def register_room(
         "is_direct": True if preset == "trusted_private_chat" else False,
     }
 
-    #_log.info("Sending registration request...")
+    # _log.info("Sending registration request...")
     try:
-        r = requests.post(url, headers={'Authorization': 'Bearer ' + as_token}, json=body, verify=config["verify-ssl"], timeout=300 )
+        r = requests.post(url, headers={'Authorization': 'Bearer ' + as_token}, json=body, verify=config["verify-ssl"],
+                          timeout=300)
     # except requests.exceptions.Timeout:
     #     # Maybe set up for a retry, or continue in a retry loop
     # except requests.exceptions.TooManyRedirects:
@@ -332,20 +342,22 @@ def register_room(
 
     return r
 
+
 def invite_users(
-    invitees,
-    creator,
-    roomId,
-    config,
+        invitees,
+        creator,
+        roomId,
+        config,
 ):
     for user in invitees:
         invite_user(roomId, user, config)
+
 
 def migrate_users(userFile, config, access_token):
     log = logging.getLogger('SLACK.MIGRATE.USER')
     userlist = []
     userData = json.load(userFile)
-    with alive_bar(len(userData), bar = 'bubbles', spinner = 'waves2') as bar:
+    with alive_bar(len(userData), bar='bubbles', spinner='waves2') as bar:
         for user in userData:
             if user["is_bot"] == True:
                 bar()
@@ -374,7 +386,7 @@ def migrate_users(userFile, config, access_token):
 
             # generate password
             _alphabet = string.ascii_letters + string.digits
-            _password = ''.join(secrets.choice(_alphabet) for i in range(20)) # for a 20-character password
+            _password = ''.join(secrets.choice(_alphabet) for i in range(20))  # for a 20-character password
 
             userDetails = {
                 "slack_id": user["id"],
@@ -389,7 +401,8 @@ def migrate_users(userFile, config, access_token):
 
             log.info("Registering Slack user " + userDetails["slack_id"] + " -> " + userDetails["matrix_id"])
             if not config["dry-run"]:
-                res = register_user(userDetails["matrix_user"], userDetails["matrix_password"], userDetails["slack_real_name"], config["homeserver"], access_token)
+                res = register_user(userDetails["matrix_user"], userDetails["matrix_password"],
+                                    userDetails["slack_real_name"], config["homeserver"], access_token)
                 if res == False:
                     log.error("ERROR while registering user '" + userDetails["matrix_id"] + "'")
                     continue
@@ -411,7 +424,7 @@ def migrate_rooms(roomFile, config, admin_user):
 
     # channels
     channelData = json.load(roomFile)
-    with alive_bar(len(channelData), bar = 'classic', spinner = 'waves2') as bar:
+    with alive_bar(len(channelData), bar='classic', spinner='waves2') as bar:
         for channel in channelData:
             if config["skip-archived"]:
                 if channel["is_archived"] == True:
@@ -435,16 +448,14 @@ def migrate_rooms(roomFile, config, admin_user):
             else:
                 for user in channel["members"]:
                     if user != channel["creator"]:
-                        if user in userLUT: # ignore dropped users like bots
+                        if user in userLUT:  # ignore dropped users like bots
                             _invitees.append(userLUT[user])
 
             minimal_invites = []
             for user in channel["members"]:
                 if user != channel["creator"]:
-                    if user in userLUT: # ignore dropped users like bots
+                    if user in userLUT:  # ignore dropped users like bots
                         minimal_invites.append(userLUT[user])
-
-
 
             roomDetails = {
                 "slack_id": channel["id"],
@@ -462,7 +473,9 @@ def migrate_rooms(roomFile, config, admin_user):
             room_preset = "private_chat" if config_yaml["import-as-private"] else "public_chat"
 
             if not config["dry-run"]:
-                res = register_room(roomDetails["slack_name"], roomDetails["matrix_creator"], roomDetails["matrix_topic"], minimal_invites, room_preset, config["homeserver"], config["as_token"])
+                res = register_room(roomDetails["slack_name"], roomDetails["matrix_creator"],
+                                    roomDetails["matrix_topic"], minimal_invites, room_preset, config["homeserver"],
+                                    config["as_token"])
 
                 if res == False:
                     log.info("ERROR while registering room '" + roomDetails["slack_name"] + "'")
@@ -472,19 +485,20 @@ def migrate_rooms(roomFile, config, admin_user):
                     roomDetails["matrix_id"] = _content["room_id"]
                 log.info("Registered Slack channel " + roomDetails["slack_name"] + " -> " + roomDetails["matrix_id"])
 
-                #invite all members
+                # invite all members
                 if config_yaml["invite-all"]:
                     invite_users(_invitees, roomDetails["matrix_creator"], roomDetails["matrix_id"], config)
-                #autojoin all members
+                # autojoin all members
                 autojoin_users(_invitees, roomDetails["matrix_id"], config)
 
             roomLUT[roomDetails["slack_id"]] = roomDetails["matrix_id"]
             roomLUT2[roomDetails["slack_id"]] = roomDetails["slack_name"]
             roomlist.append(roomDetails)
-            #time.sleep(1)
+            # time.sleep(1)
             bar()
 
     return roomlist
+
 
 def migrate_dms(roomFile, config):
     log = logging.getLogger('SLACK.MIGRATE.DMS')
@@ -492,7 +506,7 @@ def migrate_dms(roomFile, config):
 
     # channels
     channelData = json.load(roomFile)
-    with alive_bar(len(channelData), bar = 'squares', spinner = 'waves2') as bar:
+    with alive_bar(len(channelData), bar='squares', spinner='waves2') as bar:
         for channel in channelData:
 
             if config["skip-archived"]:
@@ -501,7 +515,8 @@ def migrate_dms(roomFile, config):
                     continue
 
             # skip dms with slackbot and non exist users (usual it's bots)
-            if "USLACKBOT" in channel["members"] or channel["members"][0] not in userLUT or channel["members"][1] not in userLUT:
+            if "USLACKBOT" in channel["members"] or channel["members"][0] not in userLUT or channel["members"][
+                1] not in userLUT:
                 bar()
                 continue
 
@@ -522,7 +537,8 @@ def migrate_dms(roomFile, config):
             }
 
             if not config["dry-run"]:
-                res = register_room('', roomDetails["matrix_creator"], '', _invitees, "trusted_private_chat", config["homeserver"], config["as_token"])
+                res = register_room('', roomDetails["matrix_creator"], '', _invitees, "trusted_private_chat",
+                                    config["homeserver"], config["as_token"])
 
                 if res == False:
                     log.info("ERROR while registering room '" + roomDetails["slack_id"] + "'")
@@ -532,7 +548,7 @@ def migrate_dms(roomFile, config):
                     roomDetails["matrix_id"] = _content["room_id"]
                 log.info("Registered Slack DM channel " + roomDetails["slack_id"] + " -> " + roomDetails["matrix_id"])
 
-                #autojoin all members
+                # autojoin all members
                 autojoin_users(_invitees, roomDetails["matrix_id"], config)
 
             dmLUT[roomDetails["slack_id"]] = roomDetails["matrix_id"]
@@ -543,7 +559,6 @@ def migrate_dms(roomFile, config):
 
 
 def send_reaction(config, roomId, eventId, reactionKey, userId, txnId):
-
     content = {
         "m.relates_to": {
             "event_id": eventId,
@@ -556,6 +571,7 @@ def send_reaction(config, roomId, eventId, reactionKey, userId, txnId):
 
     return res
 
+
 def replace_mention(matchobj):
     _slack_id = matchobj.group(0)[2:-1]
 
@@ -566,13 +582,17 @@ def replace_mention(matchobj):
 
     return "<a href='https://matrix.to/#/" + user_id + "'>" + displayname + "</a>"
 
+
 def getFallbackHtml(roomId, replyEvent):
     originalBody = replyEvent["body"]
     originalHtml = replyEvent["formatted_body"]
     if not replyEvent["body"]:
         originalHtml = originalBody
 
-    return '<mx-reply><blockquote><a href="https://matrix.to/#/' + roomId + '/' + replyEvent["event_id"] + '">In reply to</a><a href="https://matrix.to/#/' + replyEvent["sender"] + '">' + replyEvent["sender"] + '</a><br />' + originalHtml + '</blockquote></mx-reply>'
+    return '<mx-reply><blockquote><a href="https://matrix.to/#/' + roomId + '/' + replyEvent[
+        "event_id"] + '">In reply to</a><a href="https://matrix.to/#/' + replyEvent["sender"] + '">' + replyEvent[
+        "sender"] + '</a><br />' + originalHtml + '</blockquote></mx-reply>'
+
 
 def getFallbackText(replyEvent):
     originalBody = replyEvent["body"]
@@ -580,36 +600,36 @@ def getFallbackText(replyEvent):
     originalBody = "\n> ".join(originalBody)
     return '> <' + replyEvent["sender"] + '> ' + originalBody
 
-def parse_and_send_message(config, message, matrix_room, txnId, is_later, log):
-    content = {}
+
+def parse_and_send_message(config, message, matrix_room, txn_id, is_later, log):
     is_thread = False
     is_reply = False
 
     if message["type"] == "message":
         if "subtype" in message:
             if (message["subtype"] == "bot_message" or
-                message["subtype"] == "bot_remove" or
-                message["subtype"] == "channel_name" or
-                message["subtype"] == "channel_join" or
-                message["subtype"] == "channel_purpose" or
-                message["subtype"] == "group_name" or
-                message["subtype"] == "group_join" or
-                message["subtype"] == "group_purpose"):
-                    return txnId
+                    message["subtype"] == "bot_remove" or
+                    message["subtype"] == "channel_name" or
+                    message["subtype"] == "channel_join" or
+                    message["subtype"] == "channel_purpose" or
+                    message["subtype"] == "group_name" or
+                    message["subtype"] == "group_join" or
+                    message["subtype"] == "group_purpose"):
+                return txn_id
 
             if message["subtype"] == "file_comment":
                 # TODO migrate file_comments
-                return txnId
+                return txn_id
 
         # ignore hidden messages
         if "hidden" in message:
             if message["hidden"] == True:
-                return txnId
+                return txn_id
 
-        if "user" in message: #TODO what messages have no user?
+        if "user" in message:  # TODO what messages have no user?
             if not message["user"] in userLUT:
                 # ignore messages from bots
-                return txnId
+                return txn_id
         else:
             log.info("Message without user")
             log.info(message)
@@ -644,7 +664,7 @@ def parse_and_send_message(config, message, matrix_room, txnId, is_later, log):
         body = message["text"]
 
         # TODO do not migrate empty messages?
-        #if body == "":
+        # if body == "":
         #
         #    return txnId
 
@@ -658,16 +678,19 @@ def parse_and_send_message(config, message, matrix_room, txnId, is_later, log):
             if "subtype" in message:
                 log.info(message["subtype"])
                 if message["subtype"] == "file_comment" or message["subtype"] == "thread_broadcast":
-                    #TODO treat as reply
+                    # TODO treat as reply
                     log.info("")
                 else:
-                    txnId = process_files(message["files"], matrix_room, userLUT[message["user"]], body, txnId, config)
+                    txn_id = process_files(message["files"], matrix_room, userLUT[message["user"]], body, txn_id,
+                                           config)
             else:
-                txnId = process_files(message["files"], matrix_room, userLUT[message["user"]], body, txnId, config)
+                txn_id = process_files(message["files"], matrix_room, userLUT[message["user"]], body, txn_id, config)
 
         if "attachments" in message:
-            if message["user"] in userLUT: # ignore attachments from bots
-                txnId = process_attachments(message["attachments"], matrix_room, userLUT[message["user"]], body, txnId, config)
+            if message["user"] in userLUT:  # ignore attachments from bots
+                txn_id = process_attachments(message["attachments"], matrix_room, userLUT[message["user"]], body,
+                                             txn_id,
+                                             config)
                 for attachment in message["attachments"]:
                     if "is_share" in attachment and attachment["is_share"]:
                         if body:
@@ -680,29 +703,38 @@ def parse_and_send_message(config, message, matrix_room, txnId, is_later, log):
                             attachment_text = attachment["text"]
                         body += "".join(["&gt; _Shared (", attachment_footer, "):_ ", attachment_text, "\n"])
 
-        if "replies" in message: # this is the parent of a thread
+        # this is the parent of a thread
+        if "replies" in message:
             is_thread = True
-            previous_message = None
+            first_message = message["user"] + message["ts"]
+            previous_message = first_message
             for reply in message["replies"]:
                 if "user" in message and "ts" in message:
-                    first_message = message["user"]+message["ts"]
-                    current_message = reply["user"]+reply["ts"]
+                    current_reply = reply["user"] + reply["ts"]
                     if not previous_message:
                         previous_message = first_message
-                    replyLUT[current_message] = previous_message
+                    replyLUT[current_reply] = previous_message
+                    # TODO: understand what kind of replies out dump uses
                     if config_yaml["threads-reply-to-previous"]:
-                        previous_message = current_message
+                        previous_message = current_reply
+                else:
+                    # TODO: write error, this should not be
+                    pass
 
         # replys / threading
-        if "thread_ts" in message and "parent_user_id" in message and not "replies" in message: # this message is a reply to another message
+        if "thread_ts" in message and "parent_user_id" in message and not "replies" in message:
+            # this message is a reply to another message
             is_reply = True
-            if not message["user"]+message["ts"] in replyLUT:
+            message_id = message["user"] + message["ts"]
+            if message_id not in replyLUT:
                 # seems like we don't know the thread yet, save event for later
                 if not is_later:
                     later.append(message)
-                return txnId
-            slack_event_id = replyLUT[message["user"]+message["ts"]]
+                return txn_id
+            slack_event_id = replyLUT[message_id]
+            # TODO: check this point to _root_ message
             matrix_event_id = eventLUT[slack_event_id]
+            # TODO: check matrix_event_id is defined
 
         # TODO pinned / stared items?
 
@@ -714,22 +746,21 @@ def parse_and_send_message(config, message, matrix_room, txnId, is_later, log):
 
         if not is_reply:
             content = {
-                    "body": body,
-                    "msgtype": "m.text",
-                    "format": "org.matrix.custom.html",
-                    "formatted_body": formatted_body,
+                "body": body,
+                "msgtype": "m.text",
+                "format": "org.matrix.custom.html",
+                "formatted_body": formatted_body,
             }
         else:
-            replyEvent = threadLUT[message["parent_user_id"]+message["thread_ts"]]
-            fallbackHtml = getFallbackHtml(matrix_room, replyEvent);
-            fallbackText = getFallbackText(replyEvent);
-            body = fallbackText + "\n\n" + body
-            formatted_body = fallbackHtml + formatted_body
+            reply_event = threadLUT[message["parent_user_id"] + message["thread_ts"]]
+            fallback_html = getFallbackHtml(matrix_room, reply_event)
+            fallback_text = getFallbackText(reply_event)
+            body = fallback_text + "\n\n" + body
+            formatted_body = fallback_html + formatted_body
             content = {
                 "m.relates_to": {
-                    "m.in_reply_to": {
-                        "event_id": matrix_event_id,
-                    },
+                    "rel_type": "m.thread",
+                    "event_id": matrix_event_id,
                 },
                 "msgtype": "m.text",
                 "body": body,
@@ -739,9 +770,9 @@ def parse_and_send_message(config, message, matrix_room, txnId, is_later, log):
 
         # send message
         ts = message["ts"].replace(".", "")[:-3]
-        res = send_event(config, content, matrix_room, userLUT[message["user"]], "m.room.message", txnId, ts)
+        res = send_event(config, content, matrix_room, userLUT[message["user"]], "m.room.message", txn_id, ts)
         # save event id
-        if res == False:
+        if not res:
             log.info("ERROR while sending event '" + message["user"] + " " + message["ts"] + "'")
             log.error("ERROR body {}".format(body))
             log.error("ERROR formatted_body {}".format(formatted_body))
@@ -749,34 +780,38 @@ def parse_and_send_message(config, message, matrix_room, txnId, is_later, log):
             _content = json.loads(res.content)
             # use "user" combined with "ts" as id like Slack does as "client_msg_id" is not always set
             if "user" in message and "ts" in message:
-                eventLUT[message["user"]+message["ts"]] = _content["event_id"]
-            txnId = txnId + 1
+                eventLUT[message["user"] + message["ts"]] = _content["event_id"]
+            txn_id = txn_id + 1
             if is_thread:
-                threadLUT[message["user"]+message["ts"]] = {"body": body, "formatted_body": formatted_body, "sender": userLUT[message["user"]], "event_id": _content["event_id"]}
+                threadLUT[message["user"] + message["ts"]] = {"body": body, "formatted_body": formatted_body,
+                                                              "sender": userLUT[message["user"]],
+                                                              "event_id": _content["event_id"]}
 
             # handle reactions
             if "reactions" in message:
                 roomId = matrix_room
-                eventId = eventLUT[message["user"]+message["ts"]]
+                eventId = eventLUT[message["user"] + message["ts"]]
                 for reaction in message["reactions"]:
                     for user in reaction["users"]:
-                        #log.info("Send reaction in room " + roomId)
-                        send_reaction(config, roomId, eventId, emojize(reaction["name"], language='alias'), userLUT[user], txnId)
-                        txnId = txnId + 1
+                        # log.info("Send reaction in room " + roomId)
+                        send_reaction(config, roomId, eventId, emojize(reaction["name"], language='alias'),
+                                      userLUT[user], txn_id)
+                        txn_id = txn_id + 1
 
     else:
         log.info("Ignoring message type " + message["type"])
-    return txnId
+    return txn_id
+
 
 def migrate_messages(fileList, matrix_room, config, tick, log):
     log.debug('start migration of messages for matrix room: {}'.format(matrix_room))
     global later
-    
+
     archive = zipfile.ZipFile(config["zipfile"], 'r')
     txnId = 1
     progress = 0
 
-    with alive_bar(bar = 'checks', spinner = 'waves2', manual=True) as bar:
+    with alive_bar(bar='checks', spinner='waves2', manual=True) as bar:
         for file in fileList:
             log.debug("prcessing file {}".format(file))
             try:
@@ -790,7 +825,8 @@ def migrate_messages(fileList, matrix_room, config, tick, log):
                     txnId = parse_and_send_message(config, message, matrix_room, txnId, False, log)
                 except:
                     log.error(
-                        "Warning: Couldn't send  message: {} to matrix_room {} id:{}".format(message, matrix_room, txnId)
+                        "Warning: Couldn't send  message: {} to matrix_room {} id:{}".format(message, matrix_room,
+                                                                                             txnId)
                     )
 
             progress = progress + tick
@@ -804,10 +840,11 @@ def migrate_messages(fileList, matrix_room, config, tick, log):
     # clean up postponed messages
     later = []
 
+
 # Kick users from rooms if they not in slack room right now
 def kick_unregistred_users_from_room(server_location, roomFile, config):
     channelData = json.load(roomFile)
-    with alive_bar(len(channelData), bar = 'classic', spinner = 'waves2') as bar:
+    with alive_bar(len(channelData), bar='classic', spinner='waves2') as bar:
         for channel in channelData:
             for user in userLUT:
                 if user not in channel["members"]:
@@ -871,17 +908,16 @@ def main():
     # write LUTs to file to be able to load from later if something goes wrong
     if not read_luts:
         data = dict(
-            userLUT = userLUT,
-            nameLUT = nameLUT,
-            roomLUT = roomLUT,
-            roomLUT2 = roomLUT2,
-            dmLUT = dmLUT,
-            users = userlist,
+            userLUT=userLUT,
+            nameLUT=nameLUT,
+            roomLUT=roomLUT,
+            roomLUT2=roomLUT2,
+            dmLUT=dmLUT,
+            users=userlist,
         )
         with open('run/luts.yaml', 'w') as outfile:
             yaml.dump(data, outfile, default_flow_style=False)
 
-  
     # send events to rooms
     if not config["run-unattended"]:
         input('Migrating messages to rooms. This may take a while. Press enter to proceed\n')
@@ -892,7 +928,7 @@ def main():
         log.info("Migrating messages for room: " + roomLUT2[slack_room])
         fileList = sorted(loadZipFolder(config, roomLUT2[slack_room]))
         if fileList:
-            tick = 1/len(fileList)
+            tick = 1 / len(fileList)
             migrate_messages(fileList, matrix_room, config, tick, log)
 
     # clean up postponed messages
@@ -906,7 +942,7 @@ def main():
     for slack_room, matrix_room in dmLUT.items():
         fileList = sorted(loadZipFolder(config, slack_room))
         if fileList:
-            tick = 1/len(fileList)
+            tick = 1 / len(fileList)
             migrate_messages(fileList, matrix_room, config, tick, log)
 
     # clean up postponed messages
