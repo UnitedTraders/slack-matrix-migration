@@ -36,7 +36,7 @@ from emoji import emojize
 
 from files import process_attachments, process_files
 
-from utils import send_event, invite_user, autojoin_users
+from utils import send_event, invite_user, autojoin_users, kick_user
 
 load_dotenv()
 
@@ -804,39 +804,17 @@ def migrate_messages(fileList, matrix_room, config, tick, log):
     # clean up postponed messages
     later = []
 
-def kick_imported_users(server_location, admin_user, access_token, tick):
-    headers = {'Authorization': ' '.join(['Bearer', access_token])}
-    progress = 0
+# Kick users from rooms if they not in slack room right now
+def kick_unregistred_users_from_room(server_location, roomFile, config):
+    channelData = json.load(roomFile)
+    with alive_bar(len(channelData), bar = 'classic', spinner = 'waves2') as bar:
+        for channel in channelData:
+            for user in userLUT:
+                if user not in channel["members"]:
+                    log.info("INFO kicking user {} from room {}".format(userLUT[user], roomLUT[channel["id"]]))
+                    kick_user(server_location, roomLUT[channel["id"]], userLUT[user], config)
+            bar()
 
-    with alive_bar(spinner = 'triangles', manual=True) as bar:
-        for room in roomLUT.values():
-            url = "%s/_matrix/client/r0/rooms/%s/kick" % (server_location, room)
-
-            for name in nameLUT.keys():
-                data = {"user_id": name}
-
-                try:
-                    r = requests.post(url, json=data, headers=headers, verify=config["verify-ssl"])
-                except requests.exceptions.RequestException as e:
-                    # catastrophic error. bail.
-                    log.error(
-                        "Logging an uncaught exception {}".format(e),
-                        exc_info=(traceback)
-                    )
-                    # log.debug("error creating room {}".format(body))
-                    return False
-                else:
-                    if r.status_code != 200 and r.status_code != 201:
-                        log.info("ERROR kick imported users! Received %d %s" % (r.status_code, r.reason))
-                        if 400 <= r.status_code < 500:
-                            try:
-                                log.info(r.json()["error"])
-                            except Exception:
-                                pass
-
-            progress = progress + tick
-            #update_progress(progress)
-            bar(progress)
 
 def main():
     logging.captureWarnings(True)
@@ -903,6 +881,7 @@ def main():
         with open('run/luts.yaml', 'w') as outfile:
             yaml.dump(data, outfile, default_flow_style=False)
 
+  
     # send events to rooms
     if not config["run-unattended"]:
         input('Migrating messages to rooms. This may take a while. Press enter to proceed\n')
@@ -933,11 +912,20 @@ def main():
     # clean up postponed messages
     later = []
 
-    # kick imported users from non-dm rooms
-    if config_yaml["kick-imported-users"]:
-        log.info("Kicking imported users from rooms. This may take a while...")
-        tick = 1/len(roomLUT)
-        kick_imported_users(config["homeserver"], admin_user, access_token, tick)
+    jsonFiles = loadZip(config)
+    # Kick users from public rooms if they are not in slack room right now
+    if not config["run-unattended"]:
+        input('Kick users from public rooms. This may take a while. Press enter to proceed\n')
+    else:
+        log.info("Kick users from public rooms. This may take a while...")
+        kick_unregistred_users_from_room(config["homeserver"], jsonFiles["channels.json"], config)
+
+    # Kick users from private rooms if they are not in slack room right now
+    if not config["run-unattended"]:
+        input('Kick users from private rooms. This may take a while. Press enter to proceed\n')
+    else:
+        log.info("Kick users from private rooms. This may take a while...")
+        kick_unregistred_users_from_room(config["homeserver"], jsonFiles["groups.json"], config)
 
 
 if __name__ == "__main__":

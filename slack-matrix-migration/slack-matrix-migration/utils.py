@@ -156,3 +156,30 @@ def invite_user(
                         log.info(r.json()["error"])
                     except Exception:
                         pass
+
+def kick_user(server_location, room, user_id, config):
+    log.info("Kick {} from {}".format(user_id,room))
+    
+    _mxCreator = "".join(["@", config['admin_user'], ":", config["domain"]])
+    headers = {'Authorization': ' '.join(['Bearer', config["as_token"]])}
+    url = "%s/_matrix/client/r0/rooms/%s/kick?user_id=%s" % (server_location, room,_mxCreator)
+    data = {"user_id": user_id}
+
+    try:
+        r = requests.post(url, json=data, headers=headers, verify=config["verify-ssl"])
+    except requests.exceptions.RequestException as e:
+        # catastrophic error. bail.
+        log.error(
+            "Logging an uncaught exception {}".format(e),
+            exc_info=(traceback)
+        )
+        return False
+    else:
+        if r.status_code != 200 and r.status_code != 201:
+            log.info("ERROR kick user from room! Received %d %s" % (r.status_code, r.reason))
+            if 400 <= r.status_code < 500:
+                try:
+                    log.info(r.json()["error"])
+                except Exception:
+                    return False
+    return True
